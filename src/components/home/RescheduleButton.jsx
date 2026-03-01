@@ -60,7 +60,12 @@ ${pendingTasks.map((t, i) => `${i + 1}. ${t.title}，预估${t.estimated_minutes
 
     setLoading(false);
     setDone(true);
-    onRescheduled?.(result.message);
+    const message = typeof result.message === 'string'
+      ? result.message
+      : result.message
+        ? JSON.stringify(result.message)
+        : '';
+    onRescheduled?.(message);
     setTimeout(() => setDone(false), 3000);
   };
 

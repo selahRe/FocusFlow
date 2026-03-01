@@ -48,6 +48,32 @@ const entities = {
     update: (id, data) => request(`/api/habit-anchors/${id}`, { method: 'PUT', body: data }),
     delete: (id) => request(`/api/habit-anchors/${id}`, { method: 'DELETE' })
   },
+  HabitLog: {
+    list: (order, limit) => request(`/api/habit-logs${buildQuery({ order, limit })}`),
+    filter: async (filter = {}, order, limit) => {
+      if (filter.id) {
+        const item = await request(`/api/habit-logs/${filter.id}`);
+        return item ? [item] : [];
+      }
+      return request(`/api/habit-logs${buildQuery({ ...filter, order, limit })}`);
+    },
+    create: (data) => request('/api/habit-logs', { method: 'POST', body: data }),
+    update: (id, data) => request(`/api/habit-logs/${id}`, { method: 'PUT', body: data }),
+    delete: (id) => request(`/api/habit-logs/${id}`, { method: 'DELETE' })
+  },
+  MonthGoal: {
+    list: (order, limit) => request(`/api/month-goals${buildQuery({ order, limit })}`),
+    filter: async (filter = {}, order, limit) => {
+      if (filter.id) {
+        const item = await request(`/api/month-goals/${filter.id}`);
+        return item ? [item] : [];
+      }
+      return request(`/api/month-goals${buildQuery({ ...filter, order, limit })}`);
+    },
+    create: (data) => request('/api/month-goals', { method: 'POST', body: data }),
+    update: (id, data) => request(`/api/month-goals/${id}`, { method: 'PUT', body: data }),
+    delete: (id) => request(`/api/month-goals/${id}`, { method: 'DELETE' })
+  },
   UserPreference: {
     list: (order, limit) => request(`/api/user-preferences${buildQuery({ order, limit })}`),
     create: (data) => request('/api/user-preferences', { method: 'POST', body: data }),

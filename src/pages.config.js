@@ -54,6 +54,7 @@ import Settings from './pages/Settings';
 import Stats from './pages/Stats';
 import TaskDetail from './pages/TaskDetail';
 import Habits from './pages/Habits';
+import MonthPlan from './pages/MonthPlan';
 import __Layout from './Layout.jsx';
 
 
@@ -65,6 +66,7 @@ export const PAGES = {
     "Stats": Stats,
     "TaskDetail": TaskDetail,
     "Habits": Habits,
+    "MonthPlan": MonthPlan,
 }
 
 export const pagesConfig = {

@@ -70,6 +70,24 @@ const initDb = async () => {
     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  await pool.query(`CREATE TABLE IF NOT EXISTS habit_logs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    habit_id BIGINT,
+    date DATE,
+    completed TINYINT(1) DEFAULT 0,
+    is_forgiven TINYINT(1) DEFAULT 0,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS month_goals (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255),
+    month VARCHAR(10),
+    milestones JSON,
+    status VARCHAR(20),
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   await pool.query(`CREATE TABLE IF NOT EXISTS user_preferences (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     constraint_level VARCHAR(20),
@@ -314,6 +332,138 @@ app.delete('/api/habit-anchors/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Habit Logs
+app.get('/api/habit-logs', async (req, res) => {
+  const { habit_id, date, order, limit } = req.query;
+  const { column, direction } = parseOrder(order, 'created_date');
+  const where = [];
+  const params = [];
+  if (habit_id) {
+    where.push('habit_id = ?');
+    params.push(habit_id);
+  }
+  if (date) {
+    where.push('date = ?');
+    params.push(date);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const limitSql = limit ? 'LIMIT ?' : '';
+  if (limit) params.push(Number(limit));
+  const [rows] = await pool.query(
+    `SELECT * FROM habit_logs ${whereSql} ORDER BY ${column} ${direction} ${limitSql}`,
+    params
+  );
+  res.json(rows);
+});
+
+app.get('/api/habit-logs/:id', async (req, res) => {
+  const [rows] = await pool.query('SELECT * FROM habit_logs WHERE id = ?', [req.params.id]);
+  res.json(rows[0] || null);
+});
+
+app.post('/api/habit-logs', async (req, res) => {
+  const data = req.body;
+  const [result] = await pool.query(
+    `INSERT INTO habit_logs (habit_id, date, completed, is_forgiven)
+     VALUES (?, ?, ?, ?)` ,
+    [
+      data.habit_id,
+      data.date,
+      data.completed ? 1 : 0,
+      data.is_forgiven ? 1 : 0
+    ]
+  );
+  const [rows] = await pool.query('SELECT * FROM habit_logs WHERE id = ?', [result.insertId]);
+  res.json(rows[0]);
+});
+
+app.put('/api/habit-logs/:id', async (req, res) => {
+  const data = { ...req.body };
+  const fields = [];
+  const params = [];
+  Object.entries(data).forEach(([key, value]) => {
+    fields.push(`${key} = ?`);
+    if (key === 'completed' || key === 'is_forgiven') {
+      params.push(value ? 1 : 0);
+    } else {
+      params.push(value);
+    }
+  });
+  params.push(req.params.id);
+  await pool.query(`UPDATE habit_logs SET ${fields.join(', ')} WHERE id = ?`, params);
+  const [rows] = await pool.query('SELECT * FROM habit_logs WHERE id = ?', [req.params.id]);
+  res.json(rows[0]);
+});
+
+app.delete('/api/habit-logs/:id', async (req, res) => {
+  await pool.query('DELETE FROM habit_logs WHERE id = ?', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// Month Goals
+app.get('/api/month-goals', async (req, res) => {
+  const { month, order, limit } = req.query;
+  const { column, direction } = parseOrder(order, 'created_date');
+  const where = [];
+  const params = [];
+  if (month) {
+    where.push('month = ?');
+    params.push(month);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const limitSql = limit ? 'LIMIT ?' : '';
+  if (limit) params.push(Number(limit));
+  const [rows] = await pool.query(
+    `SELECT * FROM month_goals ${whereSql} ORDER BY ${column} ${direction} ${limitSql}`,
+    params
+  );
+  res.json(normalizeRows(rows, ['milestones']));
+});
+
+app.get('/api/month-goals/:id', async (req, res) => {
+  const [rows] = await pool.query('SELECT * FROM month_goals WHERE id = ?', [req.params.id]);
+  res.json(normalizeRows(rows, ['milestones'])[0] || null);
+});
+
+app.post('/api/month-goals', async (req, res) => {
+  const data = req.body;
+  const [result] = await pool.query(
+    `INSERT INTO month_goals (title, month, milestones, status)
+     VALUES (?, ?, ?, ?)` ,
+    [
+      data.title,
+      data.month,
+      toJsonString(data.milestones),
+      data.status || 'active'
+    ]
+  );
+  const [rows] = await pool.query('SELECT * FROM month_goals WHERE id = ?', [result.insertId]);
+  res.json(normalizeRows(rows, ['milestones'])[0]);
+});
+
+app.put('/api/month-goals/:id', async (req, res) => {
+  const data = { ...req.body };
+  const fields = [];
+  const params = [];
+  Object.entries(data).forEach(([key, value]) => {
+    fields.push(`${key} = ?`);
+    if (key === 'milestones') {
+      params.push(toJsonString(value));
+    } else {
+      params.push(value);
+    }
+  });
+  params.push(req.params.id);
+  await pool.query(`UPDATE month_goals SET ${fields.join(', ')} WHERE id = ?`, params);
+  const [rows] = await pool.query('SELECT * FROM month_goals WHERE id = ?', [req.params.id]);
+  res.json(normalizeRows(rows, ['milestones'])[0]);
+});
+
+app.delete('/api/month-goals/:id', async (req, res) => {
+  await pool.query('DELETE FROM month_goals WHERE id = ?', [req.params.id]);
+  res.json({ ok: true });
+});
+
 // User Preferences
 app.get('/api/user-preferences', async (req, res) => {
   const { order, limit } = req.query;
@@ -528,6 +678,12 @@ app.post('/api/llm', async (req, res) => {
       response_format: response_json_schema ? { type: 'json_object' } : undefined
     })
   });
+  if (!response.ok) {
+    const errorText = await response.text();
+    return res.status(response.status).json({
+      error: errorText || 'LLM request failed.'
+    });
+  }
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content || '';
   console.log('[LLM] response', {

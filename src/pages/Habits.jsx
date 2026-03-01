@@ -7,6 +7,7 @@ import { Plus, Check, Flame, ChevronRight, Loader2, X, Zap } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import HabitHeatmap from '@/components/habits/HabitHeatmap';
 
 const TIME_LABELS = { morning: '🌅 早晨', afternoon: '☀️ 下午', evening: '🌙 傍晚', anytime: '⏱ 随时' };
 
@@ -158,6 +159,9 @@ function HabitCard({ habit, onComplete, onDelete }) {
             <X className="w-4 h-4" />
           </button>
         </div>
+        <div className="mt-4">
+          <HabitHeatmap habit={habit} />
+        </div>
       </Card>
     </motion.div>
   );
@@ -181,13 +185,24 @@ export default function Habits() {
   const completeMutation = useMutation({
     mutationFn: async (habit) => {
       const newStreak = habit.last_completed_date === format(new Date(Date.now() - 86400000), 'yyyy-MM-dd') ? (habit.streak || 0) + 1 : 1;
-      return localApi.entities.HabitAnchor.update(habit.id, {
+      const updatedHabit = await localApi.entities.HabitAnchor.update(habit.id, {
         completed_today: true,
         last_completed_date: today,
         streak: newStreak,
       });
+      const existingLogs = await localApi.entities.HabitLog.filter({ habit_id: habit.id, date: today });
+      if (existingLogs[0]) {
+        await localApi.entities.HabitLog.update(existingLogs[0].id, { completed: true });
+      } else {
+        await localApi.entities.HabitLog.create({ habit_id: habit.id, date: today, completed: true, is_forgiven: false });
+      }
+      return updatedHabit;
     },
-    onSuccess: () => { queryClient.invalidateQueries(['habits']); toast.success('最小习惯完成！🎉'); }
+    onSuccess: () => {
+      queryClient.invalidateQueries(['habits']);
+      queryClient.invalidateQueries({ queryKey: ['habitLogs'] });
+      toast.success('最小习惯完成！🎉');
+    }
   });
 
   const deleteMutation = useMutation({

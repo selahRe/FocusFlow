@@ -17,6 +17,7 @@ import CreateTaskModal from "@/components/ui/CreateTaskModal";
 import GoodStartMode from "@/components/home/GoodStartMode";
 import ImperfectAcceptance from "@/components/home/ImperfectAcceptance";
 import RescheduleButton from "@/components/home/RescheduleButton";
+import NaturalLanguageInput from "@/components/home/NaturalLanguageInput";
 
 export const parseMinutes = (value) => {
   if (typeof value === 'number') return value;
@@ -70,6 +71,10 @@ DailyStats:r`;
   const [isGenerating, setIsGenerating] = useState(false);
   const [rescheduleMsg, setRescheduleMsg] = useState('');
   const [showGoodStart, setShowGoodStart] = useState(true);
+  const [intakeCollapsed, setIntakeCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('home_intake_collapsed') === 'true';
+  });
   const queryClient = useQueryClient();
   const today = format(new Date(), 'yyyy-MM-dd');
 
@@ -212,6 +217,16 @@ DailyStats:r`;
             isLocked={pendingTasks.some(t => t.status === 'in_progress')}
           />
         </motion.div>
+
+        <NaturalLanguageInput
+          onTasksCreated={() => queryClient.invalidateQueries({ queryKey: ['tasks'] })}
+          isCollapsed={intakeCollapsed}
+          onToggle={() => {
+            const next = !intakeCollapsed;
+            setIntakeCollapsed(next);
+            window.localStorage.setItem('home_intake_collapsed', String(next));
+          }}
+        />
 
         {/* 今日任务 */}
         <div className="mb-6">

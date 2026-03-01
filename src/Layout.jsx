@@ -1,13 +1,14 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { Home, BarChart3, Settings, Sparkles, Link2 } from 'lucide-react';
+import { Home, BarChart3, Settings, Sparkles, Link2, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Toaster } from "@/components/ui/sonner";
 
 const navItems = [
   { page: 'Home', icon: Home, label: '首页' },
   { page: 'Habits', icon: Link2, label: '习惯' },
+  { page: 'MonthPlan', icon: Calendar, label: '月计划' },
   { page: 'Stats', icon: BarChart3, label: '统计' },
   { page: 'Coach', icon: Sparkles, label: '教练' },
   { page: 'Settings', icon: Settings, label: '设置' }

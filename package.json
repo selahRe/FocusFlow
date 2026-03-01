@@ -1,5 +1,5 @@
 {
-  "name": "base44-app",
+  "name": "focusflow",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -15,8 +15,6 @@
     "test:api": "vitest --run -c vitest.api.config.js"
   },
   "dependencies": {
-    "@base44/sdk": "^0.8.3",
-    "@base44/vite-plugin": "^0.2.15",
     "@hello-pangea/dnd": "^17.0.0",
     "@hookform/resolvers": "^4.1.2",
     "@radix-ui/react-accordion": "^1.2.3",
