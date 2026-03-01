@@ -25,6 +25,7 @@ export default function TaskCard({ task, onStart, onViewDetails, compact = false
   const completedSubtasks = task.subtasks?.filter(s => s.completed)?.length || 0;
   const totalSubtasks = task.subtasks?.length || 0;
   const progress = totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0;
+  const timeRange = task.subtasks?.find(s => s.start_time && s.end_time);
   
   const intensity = intensityConfig[task.intensity] || intensityConfig.medium;
   const category = categoryConfig[task.category] || categoryConfig.other;
@@ -70,6 +71,12 @@ export default function TaskCard({ task, onStart, onViewDetails, compact = false
             <Clock className="w-4 h-4" />
             <span>{task.estimated_minutes || 60}分钟</span>
           </div>
+          {timeRange && (
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-4 h-4" />
+              <span>{timeRange.start_time} - {timeRange.end_time}</span>
+            </div>
+          )}
           {totalSubtasks > 0 && (
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4" />

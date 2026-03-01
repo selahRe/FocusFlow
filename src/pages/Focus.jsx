@@ -17,6 +17,27 @@ import StartupRitual from "@/components/focus/StartupRitual";
 import BodyScan from "@/components/focus/BodyScan";
 import DistractionLog from "@/components/focus/DistractionLog";
 
+const formatTime = (date) => format(date, 'HH:mm');
+
+export const rescheduleSubtasks = (subtasks, startIndex, startTime, breakMinutes) => {
+  let cursor = new Date(startTime.getTime());
+  return subtasks.map((st, idx) => {
+    if (idx < startIndex) return st;
+    const duration = Number(st.duration_minutes) || 0;
+    const start = new Date(cursor.getTime());
+    const end = new Date(cursor.getTime());
+    end.setMinutes(end.getMinutes() + duration);
+    const next = new Date(end.getTime());
+    next.setMinutes(next.getMinutes() + breakMinutes);
+    cursor = next;
+    return {
+      ...st,
+      start_time: formatTime(start),
+      end_time: formatTime(end)
+    };
+  });
+};
+
 export default function Focus() {
   const urlParams = new URLSearchParams(window.location.search);
   const taskId = urlParams.get('taskId');
@@ -100,18 +121,30 @@ export default function Focus() {
 
     // 更新子任务状态
     const updatedSubtasks = [...task.subtasks];
+    const now = new Date();
     updatedSubtasks[currentSubtaskIndex] = {
       ...updatedSubtasks[currentSubtaskIndex],
-      completed: true
+      completed: true,
+      end_time: formatTime(now)
     };
 
+    const breakMinutes = userPref?.break_duration || 5;
+    const startNext = new Date(now.getTime());
+    startNext.setMinutes(startNext.getMinutes() + breakMinutes);
+    const rescheduled = rescheduleSubtasks(
+      updatedSubtasks,
+      currentSubtaskIndex + 1,
+      startNext,
+      breakMinutes
+    );
+
     // 检查是否全部完成
-    const allCompleted = updatedSubtasks.every(st => st.completed);
+    const allCompleted = rescheduled.every(st => st.completed);
 
     await updateTaskMutation.mutateAsync({
       id: task.id,
       data: {
-        subtasks: updatedSubtasks,
+        subtasks: rescheduled,
         status: allCompleted ? 'completed' : 'in_progress'
       }
     });

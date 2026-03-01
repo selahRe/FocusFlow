@@ -74,3 +74,17 @@ CREATE TABLE IF NOT EXISTS focus_sessions (
   notes TEXT,
   created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id VARCHAR(36) PRIMARY KEY,
+  metadata JSON,
+  created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  conversation_id VARCHAR(36),
+  role VARCHAR(20),
+  content TEXT,
+  created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

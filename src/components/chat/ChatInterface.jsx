@@ -7,10 +7,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from 'react-markdown';
 import { cn } from "@/lib/utils";
 import { localApi } from "@/api/localApi";
+import { format } from "date-fns";
+import { toast } from "sonner";
 
 export default function ChatInterface({ 
   conversationId,
   onNewPlan,
+  persistKey,
   placeholder = "告诉我你想完成什么任务...",
   quickPrompts = []
 }) {
@@ -18,21 +21,33 @@ export default function ChatInterface({
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [conversation, setConversation] = useState(null);
+  const [activeConversationId, setActiveConversationId] = useState(conversationId || null);
+  const [isCreatingTask, setIsCreatingTask] = useState(false);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [draftPlan, setDraftPlan] = useState(null);
+  const [draftSourceIndex, setDraftSourceIndex] = useState(null);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
     if (conversationId) {
-      loadConversation();
+      setActiveConversationId(conversationId);
+      loadConversation(conversationId);
+    } else if (persistKey) {
+      const savedId = window.localStorage.getItem(persistKey);
+      if (savedId) {
+        setActiveConversationId(savedId);
+        loadConversation(savedId);
+      }
     }
-  }, [conversationId]);
+  }, [conversationId, persistKey]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const loadConversation = async () => {
+  const loadConversation = async (id) => {
     try {
-      const conv = await localApi.agents.getConversation(conversationId);
+      const conv = await localApi.agents.getConversation(id);
       setConversation(conv);
       setMessages(conv.messages || []);
     } catch (err) {
@@ -46,6 +61,10 @@ export default function ChatInterface({
         agent_name: "focus_coach",
         metadata: { name: "专注规划对话" }
       });
+      if (persistKey && conv?.id) {
+        window.localStorage.setItem(persistKey, conv.id);
+      }
+      setActiveConversationId(conv?.id || null);
       setConversation(conv);
       return conv;
     } catch (err) {
@@ -85,6 +104,106 @@ export default function ChatInterface({
   const handleSubmit = (e) => {
     e.preventDefault();
     sendMessage(input);
+  };
+
+  const getLastUserMessage = () => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user') return messages[i].content;
+    }
+    return '';
+  };
+
+  const getLastAssistantMessage = () => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'assistant') return messages[i].content;
+    }
+    return '';
+  };
+
+  const buildPlanFromAssistant = async () => {
+    const assistantText = getLastAssistantMessage();
+    const userText = getLastUserMessage();
+    const prompt = `请基于AI给出的时间规划，生成一个可直接创建的任务JSON。
+要求：
+- title 不超过30字
+- estimated_minutes 为整数
+- intensity 仅使用 light/medium/high
+- category 仅使用 study/work/exercise/housework/creative/other
+    - subtasks 为数组，每项包含 title/duration_minutes/start_time/end_time/reward_minutes
+    - start_time/end_time 使用 HH:mm
+
+    当前时间：${format(new Date(), 'HH:mm')}
+    当前日期：${format(new Date(), 'yyyy-MM-dd')}
+
+    AI规划内容：
+    ${assistantText || '未获取到规划内容'}
+
+    用户需求：${userText || '帮我制定一个专注计划'}`;
+
+    const result = await localApi.integrations.Core.InvokeLLM({
+      prompt,
+      response_json_schema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          estimated_minutes: { type: "number" },
+          intensity: { type: "string" },
+          category: { type: "string" },
+          subtasks: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                duration_minutes: { type: "number" },
+                start_time: { type: "string" },
+                end_time: { type: "string" },
+                reward_minutes: { type: "number" }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return {
+      title: result.title || '专注计划',
+      description: result.description || userText,
+      estimated_minutes: Math.round(result.estimated_minutes || 60),
+      intensity: result.intensity || 'medium',
+      category: result.category || 'other',
+      subtasks: Array.isArray(result.subtasks) ? result.subtasks : []
+    };
+  };
+
+  const handleGeneratePlan = async (sourceIndex) => {
+    if (!onNewPlan) return;
+    setIsGeneratingPlan(true);
+    try {
+      const plan = await buildPlanFromAssistant();
+      setDraftPlan(plan);
+      setDraftSourceIndex(sourceIndex);
+    } catch (err) {
+      console.error('Failed to generate plan:', err);
+      toast.error('生成任务预览失败，请重试');
+    } finally {
+      setIsGeneratingPlan(false);
+    }
+  };
+
+  const handleAddPlan = async () => {
+    if (!onNewPlan || !draftPlan) return;
+    setIsCreatingTask(true);
+    try {
+      await onNewPlan(draftPlan);
+      toast.success('已添加到今日任务');
+    } catch (err) {
+      console.error('Failed to add plan:', err);
+      toast.error('添加任务失败，请重试');
+    } finally {
+      setIsCreatingTask(false);
+    }
   };
 
   return (
@@ -140,16 +259,155 @@ export default function ChatInterface({
               )}
               <div className={cn(
                 "max-w-[80%] rounded-2xl px-4 py-3",
-                msg.role === 'user' 
-                  ? "bg-slate-800 text-white" 
+                msg.role === 'user'
+                  ? "bg-slate-800 text-white"
                   : "bg-white border border-slate-200"
               )}>
                 {msg.role === 'user' ? (
                   <p>{msg.content}</p>
                 ) : (
-                  <ReactMarkdown className="prose prose-sm prose-slate max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                    {msg.content}
-                  </ReactMarkdown>
+                  <div className="space-y-3">
+                    <ReactMarkdown className="prose prose-sm prose-slate max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                      {msg.content}
+                    </ReactMarkdown>
+                    {onNewPlan && index === messages.length - 1 && (
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="rounded-full"
+                          onClick={() => handleGeneratePlan(index)}
+                          disabled={isGeneratingPlan}
+                        >
+                          {isGeneratingPlan ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                              生成中...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-4 h-4 mr-1" />
+                              生成任务预览
+                            </>
+                          )}
+                        </Button>
+                        {draftPlan && draftSourceIndex === index && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="rounded-full"
+                            onClick={handleAddPlan}
+                            disabled={isCreatingTask}
+                          >
+                            {isCreatingTask ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                添加中...
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-4 h-4 mr-1" />
+                                添加到今日任务
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {draftPlan && draftSourceIndex === index && (
+                      <div className="mt-3 space-y-3">
+                        <Card className="border-slate-200">
+                          <div className="p-4 space-y-3">
+                            <Input
+                              value={draftPlan.title}
+                              onChange={(e) => setDraftPlan({ ...draftPlan, title: e.target.value })}
+                              placeholder="任务标题"
+                            />
+                            <Input
+                              value={draftPlan.description || ''}
+                              onChange={(e) => setDraftPlan({ ...draftPlan, description: e.target.value })}
+                              placeholder="任务描述"
+                            />
+                            <div className="grid grid-cols-3 gap-2">
+                              <Input
+                                value={draftPlan.estimated_minutes}
+                                onChange={(e) => setDraftPlan({ ...draftPlan, estimated_minutes: Number(e.target.value) || 0 })}
+                                placeholder="分钟"
+                              />
+                              <Input
+                                value={draftPlan.intensity}
+                                onChange={(e) => setDraftPlan({ ...draftPlan, intensity: e.target.value })}
+                                placeholder="light/medium/high"
+                              />
+                              <Input
+                                value={draftPlan.category}
+                                onChange={(e) => setDraftPlan({ ...draftPlan, category: e.target.value })}
+                                placeholder="study/work/..."
+                              />
+                            </div>
+                          </div>
+                        </Card>
+
+                        <Card className="border-slate-200">
+                          <div className="p-4 space-y-2">
+                            <div className="text-sm font-medium text-slate-700">子任务预览</div>
+                            {draftPlan.subtasks.length === 0 && (
+                              <div className="text-xs text-slate-500">暂无子任务</div>
+                            )}
+                            {draftPlan.subtasks.map((st, idx) => (
+                              <div key={idx} className="grid grid-cols-5 gap-2">
+                                <Input
+                                  value={st.title || ''}
+                                  onChange={(e) => {
+                                    const next = [...draftPlan.subtasks];
+                                    next[idx] = { ...next[idx], title: e.target.value };
+                                    setDraftPlan({ ...draftPlan, subtasks: next });
+                                  }}
+                                  placeholder="标题"
+                                />
+                                <Input
+                                  value={st.start_time || ''}
+                                  onChange={(e) => {
+                                    const next = [...draftPlan.subtasks];
+                                    next[idx] = { ...next[idx], start_time: e.target.value };
+                                    setDraftPlan({ ...draftPlan, subtasks: next });
+                                  }}
+                                  placeholder="开始"
+                                />
+                                <Input
+                                  value={st.end_time || ''}
+                                  onChange={(e) => {
+                                    const next = [...draftPlan.subtasks];
+                                    next[idx] = { ...next[idx], end_time: e.target.value };
+                                    setDraftPlan({ ...draftPlan, subtasks: next });
+                                  }}
+                                  placeholder="结束"
+                                />
+                                <Input
+                                  value={st.duration_minutes || ''}
+                                  onChange={(e) => {
+                                    const next = [...draftPlan.subtasks];
+                                    next[idx] = { ...next[idx], duration_minutes: Number(e.target.value) || 0 };
+                                    setDraftPlan({ ...draftPlan, subtasks: next });
+                                  }}
+                                  placeholder="分钟"
+                                />
+                                <Input
+                                  value={st.reward_minutes || ''}
+                                  onChange={(e) => {
+                                    const next = [...draftPlan.subtasks];
+                                    next[idx] = { ...next[idx], reward_minutes: Number(e.target.value) || 0 };
+                                    setDraftPlan({ ...draftPlan, subtasks: next });
+                                  }}
+                                  placeholder="奖励"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </Card>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
               {msg.role === 'user' && (

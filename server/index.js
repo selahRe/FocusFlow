@@ -113,6 +113,20 @@ const initDb = async () => {
     notes TEXT,
     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS conversations (
+    id VARCHAR(36) PRIMARY KEY,
+    metadata JSON,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS conversation_messages (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    conversation_id VARCHAR(36),
+    role VARCHAR(20),
+    content TEXT,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
 };
 
 const parseOrder = (order, defaultColumn = 'created_date') => {
@@ -147,6 +161,14 @@ const normalizeRows = (rows, jsonFields = []) => {
     });
     return next;
   });
+};
+
+const toDbDateTime = (value) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
 
 app.get('/api/health', (_req, res) => {
@@ -428,8 +450,8 @@ app.post('/api/focus-sessions', async (req, res) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
     [
       data.task_id,
-      data.start_time,
-      data.end_time,
+      toDbDateTime(data.start_time),
+      toDbDateTime(data.end_time),
       data.planned_duration,
       data.actual_duration,
       data.interruptions,
@@ -455,19 +477,41 @@ const extractJson = (content) => {
   try {
     return JSON.parse(content);
   } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        return { text: content };
+      }
+    }
     return { text: content };
   }
 };
 
 app.post('/api/llm', async (req, res) => {
-  const { prompt } = req.body;
+  const { prompt, response_json_schema } = req.body;
+  console.log('[LLM] request', {
+    hasSchema: Boolean(response_json_schema),
+    promptLength: typeof prompt === 'string' ? prompt.length : 0
+  });
   if (!LLM_API_URL || !LLM_TOKEN) {
     return res.json({ text: 'LLM not configured.' });
   }
   const url = buildLlmUrl(LLM_API_URL);
   const messages = [];
   if (COACH_SYSTEM_PROMPT) {
-    messages.push({ role: 'system', content: COACH_SYSTEM_PROMPT });
+    const nowIso = new Date().toISOString();
+    messages.push({
+      role: 'system',
+      content: `${COACH_SYSTEM_PROMPT}\n当前时间：${nowIso}`
+    });
+  }
+  if (response_json_schema) {
+    messages.push({
+      role: 'system',
+      content: '只返回严格JSON，不要额外解释或包裹代码块。'
+    });
   }
   messages.push({ role: 'user', content: prompt });
 
@@ -480,54 +524,79 @@ app.post('/api/llm', async (req, res) => {
     body: JSON.stringify({
       model: LLM_MODEL,
       messages,
-      temperature: 0.4
+      temperature: 0.4,
+      response_format: response_json_schema ? { type: 'json_object' } : undefined
     })
   });
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content || '';
+  console.log('[LLM] response', {
+    status: response.status,
+    contentPreview: content.slice(0, 300)
+  });
   res.json(extractJson(content));
 });
 
-// Conversations (simple in-memory store)
-const conversations = new Map();
-
-app.post('/api/conversations', (req, res) => {
-  const id = crypto.randomUUID();
-  const conversation = {
-    id,
-    metadata: req.body?.metadata || {},
-    messages: []
+const fetchConversation = async (conversationId) => {
+  const [rows] = await pool.query('SELECT * FROM conversations WHERE id = ?', [conversationId]);
+  if (!rows[0]) return null;
+  const [messages] = await pool.query(
+    'SELECT role, content FROM conversation_messages WHERE conversation_id = ? ORDER BY id ASC',
+    [conversationId]
+  );
+  const conversation = normalizeRows(rows, ['metadata'])[0];
+  return {
+    id: conversation.id,
+    metadata: conversation.metadata || {},
+    messages: messages || []
   };
-  conversations.set(id, conversation);
-  res.json(conversation);
+};
+
+app.post('/api/conversations', async (req, res) => {
+  const id = crypto.randomUUID();
+  const metadata = req.body?.metadata || {};
+  await pool.query('INSERT INTO conversations (id, metadata) VALUES (?, ?)', [id, toJsonString(metadata)]);
+  res.json({ id, metadata, messages: [] });
 });
 
-app.get('/api/conversations/:id', (req, res) => {
-  const conversation = conversations.get(req.params.id);
+app.get('/api/conversations/:id', async (req, res) => {
+  const conversation = await fetchConversation(req.params.id);
   res.json(conversation || null);
 });
 
 app.post('/api/conversations/:id/messages', async (req, res) => {
-  const conversation = conversations.get(req.params.id);
+  const { role, content } = req.body;
+  const conversation = await fetchConversation(req.params.id);
   if (!conversation) {
     return res.status(404).json({ error: 'Conversation not found' });
   }
-  const { role, content } = req.body;
   if (role && content) {
-    conversation.messages.push({ role, content });
+    await pool.query(
+      'INSERT INTO conversation_messages (conversation_id, role, content) VALUES (?, ?, ?)',
+      [req.params.id, role, content]
+    );
   }
 
   if (!LLM_API_URL || !LLM_TOKEN) {
-    conversation.messages.push({ role: 'assistant', content: 'LLM not configured.' });
-    return res.json(conversation);
+    await pool.query(
+      'INSERT INTO conversation_messages (conversation_id, role, content) VALUES (?, ?, ?)',
+      [req.params.id, 'assistant', 'LLM not configured.']
+    );
+    const updated = await fetchConversation(req.params.id);
+    return res.json(updated);
   }
 
   const url = buildLlmUrl(LLM_API_URL);
   const messages = [];
   if (COACH_SYSTEM_PROMPT) {
-    messages.push({ role: 'system', content: COACH_SYSTEM_PROMPT });
+    const nowIso = new Date().toISOString();
+    messages.push({
+      role: 'system',
+      content: `${COACH_SYSTEM_PROMPT}\n当前时间：${nowIso}`
+    });
   }
-  messages.push(...conversation.messages);
+  const updatedConversation = await fetchConversation(req.params.id);
+  messages.push(...(updatedConversation?.messages || []));
 
   const response = await fetch(url, {
     method: 'POST',
@@ -543,19 +612,27 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
   });
   const data = await response.json();
   const contentReply = data?.choices?.[0]?.message?.content || '';
-  conversation.messages.push({ role: 'assistant', content: contentReply });
-  res.json(conversation);
+  await pool.query(
+    'INSERT INTO conversation_messages (conversation_id, role, content) VALUES (?, ?, ?)',
+    [req.params.id, 'assistant', contentReply]
+  );
+  const finalConversation = await fetchConversation(req.params.id);
+  res.json(finalConversation);
 });
 
 const port = process.env.PORT || 3001;
 
-initDb()
-  .then(() => {
-    app.listen(port, () => {
-      console.log(`Local API server running on http://localhost:${port}`);
+if (process.env.NODE_ENV !== 'test') {
+  initDb()
+    .then(() => {
+      app.listen(port, () => {
+        console.log(`Local API server running on http://localhost:${port}`);
+      });
+    })
+    .catch((err) => {
+      console.error('Failed to initialize database:', err);
+      process.exit(1);
     });
-  })
-  .catch((err) => {
-    console.error('Failed to initialize database:', err);
-    process.exit(1);
-  });
+}
+
+export { app, initDb, pool };

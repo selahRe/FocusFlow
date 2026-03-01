@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Play, Pause, SkipForward, MessageCircle, Gift, AlertCircle } from "lucide-react";
+import { Play, Pause, SkipForward, MessageCircle, Gift, AlertCircle, Hourglass } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -109,14 +109,14 @@ export default function FocusTimer({
         {/* 中心内容 */}
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <motion.div
-            key={timeLeft}
-            initial={{ scale: 1.1, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="text-5xl font-bold text-slate-800 font-mono"
+            animate={{ rotate: [0, 15, -15, 0] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+            className="w-16 h-16 rounded-full bg-violet-100 flex items-center justify-center"
           >
-            {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+            <Hourglass className="w-8 h-8 text-violet-600" />
           </motion.div>
-          <p className="text-slate-500 mt-2 text-sm">{subtaskTitle}</p>
+          <p className="text-slate-700 mt-3 text-base font-semibold">专注中</p>
+          <p className="text-slate-500 mt-1 text-sm">{subtaskTitle}</p>
         </div>
       </div>
 

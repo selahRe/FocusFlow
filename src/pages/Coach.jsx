@@ -3,10 +3,24 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
+import { localApi } from '@/api/localApi';
+import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 import ChatInterface from "@/components/chat/ChatInterface";
 
 export default function Coach() {
+  const handleNewPlan = async (plan) => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    await localApi.entities.Task.create({
+      ...plan,
+      scheduled_date: today,
+      status: 'pending',
+      subtasks: plan.subtasks || []
+    });
+    toast.success('已添加到今日任务');
+  };
+
   return (
     <div className="h-screen flex flex-col pb-24 bg-gradient-to-br from-slate-50 via-violet-50/30 to-purple-50/20">
       {/* 头部 */}
@@ -25,12 +39,14 @@ export default function Coach() {
       {/* 聊天界面 */}
       <div className="flex-1 overflow-hidden">
         <ChatInterface
+          persistKey="coach_conversation_id"
           placeholder="告诉我你想完成什么..."
           quickPrompts={[
             "帮我规划今天的学习",
             "我总是无法集中注意力",
             "如何开始一个困难的任务"
           ]}
+          onNewPlan={handleNewPlan}
         />
       </div>
     </div>

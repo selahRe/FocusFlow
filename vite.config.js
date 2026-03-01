@@ -15,5 +15,11 @@ export default defineConfig({
       visualEditAgent: true
     }),
     react(),
-  ]
+  ],
+  test: {
+    environment: 'jsdom',
+    setupFiles: 'src/test/setupTests.js',
+    globals: true,
+    include: ['src/test/**/*.test.{js,jsx}']
+  }
 });

@@ -8,6 +8,7 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { format } from "date-fns";
+import { toast } from "sonner";
 
 import TaskCard from "@/components/ui/TaskCard";
 import StatsCard from "@/components/ui/StatsCard";
@@ -16,6 +17,33 @@ import CreateTaskModal from "@/components/ui/CreateTaskModal";
 import GoodStartMode from "@/components/home/GoodStartMode";
 import ImperfectAcceptance from "@/components/home/ImperfectAcceptance";
 import RescheduleButton from "@/components/home/RescheduleButton";
+
+export const parseMinutes = (value) => {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const match = value.match(/(\d+)/);
+    return match ? Number(match[1]) : 0;
+  }
+  return 0;
+};
+
+export const extractSubtasks = (response) => {
+  if (response?.task_plan?.subtasks) return response.task_plan.subtasks;
+  if (response?.subtasks) return response.subtasks;
+  return [];
+};
+
+export const normalizeSubtasks = (rawList) => {
+  return rawList.map((st, idx) => ({
+    id: st.id || st.subtask_id || `subtask-${Date.now()}-${idx}`,
+    title: st.title || st.name || `子任务${idx + 1}`,
+    duration_minutes: parseMinutes(st.duration_minutes ?? st.duration) || 15,
+    start_time: st.start_time || st.startTime || '',
+    end_time: st.end_time || st.endTime || '',
+    completed: false,
+    reward_minutes: parseMinutes(st.reward_minutes ?? st.reward) || 5
+  }));
+};
 
 export default function Home() {
   const SYSTEM_PROMPT = `你是一位专门帮助ADHD人群的专注力教练。你的目标是：
@@ -106,12 +134,11 @@ DailyStats:r`;
         }
       });
 
-      const subtasks = aiResponse.subtasks?.map((st, idx) => ({
-        ...st,
-        id: `subtask-${Date.now()}-${idx}`,
-        completed: false,
-        reward_minutes: st.reward_minutes || 5
-      })) || [];
+      const subtasks = normalizeSubtasks(extractSubtasks(aiResponse));
+
+      if (subtasks.length === 0) {
+        throw new Error('AI 规划未返回子任务');
+      }
 
       return localApi.entities.Task.create({
         ...taskData,
@@ -127,6 +154,7 @@ DailyStats:r`;
     },
     onError: () => {
       setIsGenerating(false);
+      toast.error('AI 规划失败，请重试');
     }
   });
 

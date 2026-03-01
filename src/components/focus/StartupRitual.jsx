@@ -19,9 +19,13 @@ export default function StartupRitual({ task, onComplete }) {
 - 一句话，10字以内
 - 极其具体，比如"打开文档"、"坐到桌子前"、"拿出笔记本"
 - 让人感觉"这也太简单了"
+ 让人感觉"这也太简单了"
 只输出这一句话，不要任何解释。`,
     });
-    setFirstStep(res || '打开要用的文件或工具');
+    const firstStepText = typeof res === 'string'
+      ? res
+      : res?.text || res?.first_step || res?.firstStep || '';
+    setFirstStep(firstStepText || '打开要用的文件或工具');
     setStep('ritual');
   };
 
